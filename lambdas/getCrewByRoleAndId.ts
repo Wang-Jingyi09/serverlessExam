@@ -1,27 +1,20 @@
 import { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import { MovieCrewRole } from "../shared/types";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import {
-    DynamoDBDocumentClient,
-    QueryCommand,
-    QueryCommandInput,
-} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand, QueryCommandInput } from "@aws-sdk/lib-dynamodb";
 import Ajv from "ajv";
 import schema from "../shared/types.schema.json";
 
 const ajv = new Ajv({ coerceTypes: true });
-const isValidQueryParams = ajv.compile(
-    schema.definitions["MovieCrewRole"] || {}
-);
+const isValidQueryParams = ajv.compile(schema.definitions["MovieCrewRole"] || {});
 
 const ddbDocClient = createDDbDocClient();
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     try {
         const role = event.pathParameters?.role;
-        const movieId = event.pathParameters?.movieId
-            ? parseInt(event.pathParameters.movieId)
-            : undefined;
+        const movieId = event.pathParameters?.movieId ? parseInt(event.pathParameters.movieId) : undefined;
+        const nameSubstring = event.queryStringParameters?.name;
 
         if (!role || !movieId) {
             return {
@@ -31,7 +24,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             };
         }
 
-        const queryParams = { role, movieId };
+        const queryParams = { role, movieId, nameSubstring };  // Add nameSubstring 
         if (!isValidQueryParams(queryParams)) {
             return {
                 statusCode: 400,
@@ -46,8 +39,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             ExpressionAttributeValues: { ":r": role, ":mId": movieId },
         };
 
-        const commandOutput = await ddbDocClient.send(new QueryCommand(commandInput));
+        if (nameSubstring) {
+            commandInput.FilterExpression = "contains (names, :nameSubString)";
+            commandInput.ExpressionAttributeValues[":nameSubString"] = nameSubstring;
+        }
 
+        const commandOutput = await ddbDocClient.send(new QueryCommand(commandInput));
         if (!commandOutput.Items || commandOutput.Items.length === 0) {
             return {
                 statusCode: 404,
@@ -66,7 +63,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         return {
             statusCode: 500,
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ error: "Internal server error" }),
+            body: JSON.stringify({ error: "Internal server error", details: error.message }),
         };
     }
 };
