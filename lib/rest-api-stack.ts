@@ -40,7 +40,7 @@ export class RestAPIStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       tableName: "MovieAwards",
     });
- 
+
     const movieCrewTable = new dynamodb.Table(this, "MovieCrewTable", {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       partitionKey: { name: "movieId", type: dynamodb.AttributeType.NUMBER },
@@ -115,6 +115,23 @@ export class RestAPIStack extends cdk.Stack {
       }
     );
 
+    //new 
+    const getCrewByRoleAndIdFn = new lambdanode.NodejsFunction(
+      this,
+      "GetCrewByRoleAndIdFn",
+      {
+        architecture: lambda.Architecture.ARM_64,
+        runtime: lambda.Runtime.NODEJS_16_X,
+        entry: `${__dirname}/../lambdas/getCrewByRoleAndId.ts`,
+        timeout: cdk.Duration.seconds(10),
+        memorySize: 128,
+        environment: {
+          TABLE_NAME: moviesTable.tableName,
+          REGION: "eu-west-1",
+        },
+      }
+    );
+
     new custom.AwsCustomResource(this, "moviesddbInitData", {
       onCreate: {
         service: "DynamoDB",
@@ -172,13 +189,28 @@ export class RestAPIStack extends cdk.Stack {
       "DELETE",
       new apig.LambdaIntegration(deleteMovieByIdFn, { proxy: true })
     );
-    
+
+    //new endpoint
+    const crewEndpoint = moviesEndpoint.addResource("crew");
+    const crewRoleEndpoint = crewEndpoint.addResource("{role}");
+    const crewMovieEndpoint = crewRoleEndpoint.addResource("movies");
+    const crewRoleMovieIdEndpoint = crewMovieEndpoint.addResource("{movieId}");
+
+    crewRoleMovieIdEndpoint.addMethod(
+      "GET",
+      new apig.LambdaIntegration(getCrewByRoleAndIdFn, { proxy: true })
+    );
+
+
+
     // Permissions;
     moviesTable.grantReadData(getMovieByIdFn);
     moviesTable.grantReadData(getAllMoviesFn);
-     moviesTable.grantReadWriteData(deleteMovieByIdFn)
+    moviesTable.grantReadWriteData(deleteMovieByIdFn)
     movieCastsTable.grantReadData(getMovieCastMembersFn);
     movieCastsTable.grantReadData(getMovieByIdFn)
+    //new permission
+    movieCrewTable.grantReadData(getCrewByRoleAndIdFn);
 
   }
 }
